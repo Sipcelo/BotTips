@@ -1,0 +1,53 @@
+# Ambiente (nunca commitar)
+.env
+*.env
+env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Mypy / ruff
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Temporários do projeto
+test_apis.py
+test_db.py
+uvicorn.log
+uvicorn_err.log
+init_db.sql
+
+# Rascunhos raiz (movidos para app/engine/ e app/models/)
+/calculator.py
+/filter.py
+/kelly.py
+/alert.py
+/elo.py
+/event.py
+/odds.py
+
+# Alembic (gerado automaticamente)
+app/database/migrations/__pycache__/

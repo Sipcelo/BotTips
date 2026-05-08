@@ -1,0 +1,148 @@
+"""
+Coleta de odds via The Odds API v4.
+
+Busca eventos e odds de múltiplas casas para os esportes alvo.
+Em caso de erro na API, loga e retorna lista vazia (não quebra o scheduler).
+"""
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+
+import httpx
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://api.the-odds-api.com/v4"
+
+# Esportes monitorados conforme CLAUDE.md
+TARGET_SPORTS = [
+    "tennis_atp",
+    "tennis_wta",
+    "table_tennis",
+    "handball",
+    "baseball_mlb",
+]
+
+# Casas prioritárias (sharp + soft)
+BOOKMAKERS = "pinnacle,betano,betsson,bet365"
+
+
+@dataclass
+class BookmakerOdds:
+    bookmaker: str
+    home_odd: float
+    away_odd: float
+    draw_odd: float | None = None
+    last_update: datetime | None = None
+
+
+@dataclass
+class EventOdds:
+    external_id: str
+    sport: str
+    home_team: str
+    away_team: str
+    commence_time: datetime
+    bookmakers: list[BookmakerOdds] = field(default_factory=list)
+
+
+async def fetch_events_with_odds(sport: str) -> list[EventOdds]:
+    """
+    Busca eventos com odds para um esporte específico.
+
+    Returns:
+        Lista de EventOdds. Vazia em caso de erro ou sem eventos.
+    """
+    settings = get_settings()
+    params = {
+        "apiKey": settings.odds_api_key,
+        "regions": "eu,us",
+        "markets": "h2h",
+        "oddsFormat": "decimal",
+        "bookmakers": BOOKMAKERS,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{BASE_URL}/sports/{sport}/odds", params=params)
+
+        remaining = resp.headers.get("x-requests-remaining", "?")
+        logger.info("Odds API [%s] status=%s requests_left=%s", sport, resp.status_code, remaining)
+
+        if resp.status_code == 401:
+            logger.error("Odds API: chave inválida (401)")
+            return []
+        if resp.status_code in (404, 422):
+            logger.info("Odds API: sem mercados ativos para [%s]", sport)
+            return []
+        resp.raise_for_status()
+
+        return _parse_response(sport, resp.json())
+
+    except httpx.TimeoutException:
+        logger.error("Odds API timeout para esporte %s", sport)
+        return []
+    except Exception as exc:
+        logger.error("Odds API erro inesperado [%s]: %s", sport, exc)
+        return []
+
+
+def _parse_response(sport: str, data: list[dict]) -> list[EventOdds]:
+    events: list[EventOdds] = []
+
+    for item in data:
+        try:
+            commence_time = datetime.fromisoformat(
+                item["commence_time"].replace("Z", "+00:00")
+            )
+            event = EventOdds(
+                external_id=item["id"],
+                sport=sport,
+                home_team=item["home_team"],
+                away_team=item["away_team"],
+                commence_time=commence_time,
+            )
+
+            for bm in item.get("bookmakers", []):
+                for market in bm.get("markets", []):
+                    if market["key"] != "h2h":
+                        continue
+                    outcomes = {o["name"]: o["price"] for o in market["outcomes"]}
+                    home_odd = outcomes.get(item["home_team"])
+                    away_odd = outcomes.get(item["away_team"])
+                    draw_odd = outcomes.get("Draw")
+
+                    if home_odd and away_odd:
+                        last_update = None
+                        if bm.get("last_update"):
+                            last_update = datetime.fromisoformat(
+                                bm["last_update"].replace("Z", "+00:00")
+                            )
+                        event.bookmakers.append(BookmakerOdds(
+                            bookmaker=bm["key"],
+                            home_odd=home_odd,
+                            away_odd=away_odd,
+                            draw_odd=draw_odd,
+                            last_update=last_update,
+                        ))
+
+            if event.bookmakers:
+                events.append(event)
+
+        except (KeyError, ValueError) as exc:
+            logger.warning("Erro ao parsear evento: %s — %s", exc, item.get("id"))
+
+    logger.info("Odds API [%s]: %d eventos com odds", sport, len(events))
+    return events
+
+
+async def fetch_all_sports() -> list[EventOdds]:
+    """Coleta odds de todos os esportes alvo em sequência."""
+    all_events: list[EventOdds] = []
+    for sport in TARGET_SPORTS:
+        events = await fetch_events_with_odds(sport)
+        all_events.extend(events)
+    return all_events
