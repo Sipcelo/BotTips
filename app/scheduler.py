@@ -18,7 +18,7 @@ from app.alerts.telegram import send_alert
 from app.collectors.odds_collector import EventOdds, fetch_all_sports
 from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
-from app.engine.calculator import analyze_market
+from app.engine.calculator import analyze_market, calculate_overround
 from app.engine.elo import elo_model
 from app.engine.filter import apply_filters
 from app.engine.kelly import calculate_kelly
@@ -113,10 +113,11 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
         soft_odds = [bm.home_odd, bm.away_odd]
         analysis = analyze_market(soft_odds, probs_reais=probs_reais)
 
+        overround_soft = calculate_overround(soft_odds)
         result = apply_filters(
             ev=analysis.best_ev,
             odd=analysis.best_odd,
-            overround=analyze_market(soft_odds).overround,
+            overround=overround_soft,
         )
 
         if not result.passed:
@@ -132,6 +133,10 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             continue
 
         side = "home" if analysis.best_side_index == 0 else "away"
+
+        # Fair odd real = Pinnacle devigged (referência de valor, não a Betsson devigged)
+        pinnacle_fair_odd = sharp_analysis.fair_odds[analysis.best_side_index]
+
         kelly_result = calculate_kelly(
             prob_real=analysis.best_prob_real,
             odd=analysis.best_odd,
@@ -149,7 +154,6 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             odd=analysis.best_odd,
         )
 
-        overround_soft = analyze_market(soft_odds).overround
         alert_data = AlertData(
             sport=event_odds.sport,
             tournament=event_odds.home_team.split(" ")[0],  # placeholder
@@ -160,7 +164,7 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             bookmaker=bm.bookmaker,
             side=side,
             odd=analysis.best_odd,
-            fair_odd=analysis.best_fair_odd,
+            fair_odd=pinnacle_fair_odd,   # referência Pinnacle, não Betsson
             ev=analysis.best_ev,
             prob_real=analysis.best_prob_real,
             overround=overround_soft,
