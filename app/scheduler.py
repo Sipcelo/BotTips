@@ -59,14 +59,22 @@ async def run_pipeline() -> None:
         3. Calcula EV, aplica filtros, calcula Kelly
         4. Salva no banco e envia alerta no Telegram
     """
-    logger.info("Pipeline iniciado — %s", datetime.now(tz=timezone.utc).isoformat())
+    now = datetime.now(tz=timezone.utc)
+    logger.info("Pipeline iniciado — %s", now.isoformat())
 
     try:
         events = await fetch_all_sports()
         logger.info("Pipeline: %d eventos com odds", len(events))
 
+        # Filtra apenas jogos que ainda não começaram — odds live são não confiáveis
+        # sem dados de placar em tempo real (risco de falso positivo alto)
+        upcoming = [e for e in events if e.commence_time > now]
+        skipped = len(events) - len(upcoming)
+        if skipped:
+            logger.info("Pipeline: %d evento(s) em andamento ignorado(s)", skipped)
+
         async with AsyncSessionLocal() as session:
-            for event_odds in events:
+            for event_odds in upcoming:
                 await _process_event(session, event_odds)
 
         logger.info("Pipeline concluído")

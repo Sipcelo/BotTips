@@ -75,8 +75,14 @@ def apply_filters(
                 f"Odd subiu levemente desde abertura ({odd_opening:.2f} → {odd:.2f})"
             )
 
-    if ev > 0.20:
-        warnings.append(f"EV muito alto ({ev:.1%}) — verificar dados antes de apostar")
+    # EV > 25% quase sempre indica dado defasado (jogo já em andamento,
+    # Pinnacle vs soft book desatualizadas). Descarta para evitar falsos positivos.
+    if ev > 0.25:
+        failures.append(
+            f"EV suspeito ({ev:.1%} > 25%) — possível dado defasado, descartado"
+        )
+    elif ev > 0.15:
+        warnings.append(f"EV alto ({ev:.1%}) — confirmar dados antes de apostar")
 
     return FilterResult(
         passed=len(failures) == 0,
