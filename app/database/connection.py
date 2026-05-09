@@ -14,9 +14,17 @@ class Base(DeclarativeBase):
 
 
 def _make_async_url(url: str) -> str:
-    """Converte postgresql:// para postgresql+asyncpg:// se necessário."""
+    """Converte qualquer variante de URL postgres para postgresql+asyncpg://.
+
+    O Railway fornece 'postgres://' (forma curta). O SQLAlchemy + asyncpg
+    exige 'postgresql+asyncpg://'. Tratamos os três casos possíveis.
+    """
+    if url.startswith("postgresql+asyncpg://"):
+        return url  # já está correto
     if url.startswith("postgresql://"):
         return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
     return url
 
 
