@@ -17,6 +17,7 @@ SPORT_EMOJI = {
     "table_tennis": "🏓",
     "handball": "🤾",
     "baseball_mlb": "⚾",
+    "mma_mixed_martial_arts": "🥊",
 }
 
 SPORT_LABEL = {
@@ -25,6 +26,7 @@ SPORT_LABEL = {
     "table_tennis": "Tênis de Mesa",
     "handball": "Handebol EHF",
     "baseball_mlb": "MLB",
+    "mma_mixed_martial_arts": "MMA",
 }
 
 

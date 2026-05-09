@@ -26,6 +26,7 @@ TARGET_SPORTS = [
     "table_tennis",
     "handball",
     "baseball_mlb",
+    "mma_mixed_martial_arts",
 ]
 
 # Casas prioritárias (sharp + soft)
