@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # OpenRouter — contexto qualitativo dos alertas (opcional)
     openrouter_api_key: str = ""
-    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct:free"
+    openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
 
     min_ev: float = 0.04
     min_odd: float = 1.60
