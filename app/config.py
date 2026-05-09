@@ -10,14 +10,16 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "postgresql://valuebot:valuebot_senha@localhost:5432/valuebot"
+    database_url: str = "postgresql://valuebot:valuebot_senha@127.0.0.1:5433/valuebot"
     odds_api_key: str = ""
     tennis_api_key: str = ""
     sports_api_key: str = ""
-    optic_api_key: str = ""
-    anthropic_api_key: str = ""
     telegram_token: str = ""
     telegram_chat_id: str = ""
+
+    # OpenRouter — contexto qualitativo dos alertas (opcional)
+    openrouter_api_key: str = ""
+    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct:free"
 
     min_ev: float = 0.04
     min_odd: float = 1.60

@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.alerts.context import generate_context
 from app.alerts.formatter import AlertData, format_alert
 from app.alerts.telegram import send_alert
 from app.collectors.odds_collector import EventOdds, fetch_all_sports
@@ -137,6 +138,17 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             bankroll=DEFAULT_BANKROLL,
         )
 
+        # Contexto qualitativo via OpenRouter (falha silenciosamente)
+        ai_context = await generate_context(
+            sport=event_odds.sport,
+            home_team=event_odds.home_team,
+            away_team=event_odds.away_team,
+            surface=surface,
+            side=side,
+            ev=analysis.best_ev,
+            odd=analysis.best_odd,
+        )
+
         overround_soft = analyze_market(soft_odds).overround
         alert_data = AlertData(
             sport=event_odds.sport,
@@ -156,6 +168,7 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             kelly_fraction=kelly_result.kelly_fraction,
             stake_pct=kelly_result.stake_pct,
             stake_amount=kelly_result.stake_amount,
+            ai_context=ai_context,
             warnings=result.warnings or None,
         )
 

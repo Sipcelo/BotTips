@@ -55,6 +55,9 @@ class AlertData:
     odd_opening: float | None = None
     odd_30min_ago: float | None = None
 
+    # Contexto qualitativo (gerado via OpenRouter)
+    ai_context: str | None = None
+
     # Avisos extras
     warnings: list[str] | None = None
 
@@ -69,9 +72,7 @@ def format_alert(data: AlertData) -> str:
     emoji = SPORT_EMOJI.get(data.sport, "🏅")
     sport_label = SPORT_LABEL.get(data.sport, data.sport)
     team = data.home_team if data.side == "home" else data.away_team
-    opponent = data.away_team if data.side == "home" else data.home_team
 
-    # Linha de abertura
     lines = [
         "🔴 *ALERTA VALUE BET*\n",
         f"{emoji} {sport_label} — {data.tournament}",
@@ -105,13 +106,15 @@ def format_alert(data: AlertData) -> str:
         lines.append(f"• Abertura: {data.odd_opening:.2f}")
         lines.append(f"• Atual: {data.odd:.2f} ({direction})")
 
+    # Contexto qualitativo via OpenRouter
+    if data.ai_context:
+        lines.append("")
+        lines.append(f"🧠 _{data.ai_context}_")
+
     # Horário
     lines.append("")
-    now = datetime.now(tz=timezone.utc)
-    # Validade: 10 minutos antes do início
-    validity = data.commence_time.strftime("%H:%M UTC")
     lines.append(f"🕐 Início: {data.commence_time.strftime('%H:%M UTC')}")
-    lines.append(f"⚠️  Casa: {data.bookmaker.capitalize()}")
+    lines.append(f"🏦 Casa: {data.bookmaker.capitalize()}")
 
     # Avisos
     if data.warnings:
