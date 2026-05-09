@@ -58,11 +58,17 @@ def calculate_kelly(
 
     kelly_frac = kelly_full * fraction
     stake_pct = min(kelly_frac, max_pct)
+    stake_raw = bankroll * stake_pct
+
+    # Clama dentro do range configurado (min/max stake em reais)
+    min_stake = settings.min_stake_amount
+    max_stake = settings.max_stake_amount
+    stake_final = round(max(min_stake, min(stake_raw, max_stake)), 2)
 
     return KellyResult(
         kelly_full=kelly_full,
         kelly_fraction=kelly_frac,
         stake_pct=stake_pct,
-        stake_amount=round(bankroll * stake_pct, 2),
+        stake_amount=stake_final,
         bankroll=bankroll,
     )

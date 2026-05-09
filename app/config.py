@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     max_margin: float = 0.10
     kelly_fraction: float = 0.25
     max_stake_pct: float = 0.03
+    min_stake_amount: float = 3.00   # stake mínimo em reais
+    max_stake_amount: float = 5.00   # stake máximo em reais
     poll_interval_seconds: int = 300
     environment: str = "development"
 
