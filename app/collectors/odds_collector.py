@@ -2,6 +2,8 @@
 Coleta de odds via The Odds API v4.
 
 Busca eventos e odds de múltiplas casas para os esportes alvo.
+Usa /v4/sports (1 request) para descobrir quais esportes têm mercados
+ativos antes de buscar odds — economiza requests na cota mensal.
 Em caso de erro na API, loga e retorna lista vazia (não quebra o scheduler).
 """
 
@@ -47,6 +49,53 @@ class EventOdds:
     away_team: str
     commence_time: datetime
     bookmakers: list[BookmakerOdds] = field(default_factory=list)
+
+
+async def fetch_active_target_sports() -> list[str]:
+    """
+    Consulta /v4/sports (1 request único) e retorna apenas os esportes
+    de TARGET_SPORTS que têm eventos ativos no momento.
+
+    Isso evita chamar /odds para esportes sem mercado aberto,
+    economizando requests da cota mensal.
+    """
+    settings = get_settings()
+    params = {"apiKey": settings.odds_api_key}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{BASE_URL}/sports", params=params)
+
+        remaining = resp.headers.get("x-requests-remaining", "?")
+        logger.info("Odds API [sports list] status=%s requests_left=%s", resp.status_code, remaining)
+
+        if resp.status_code == 401:
+            logger.error("Odds API: chave inválida (401) — abortando pipeline")
+            return []
+
+        resp.raise_for_status()
+
+        active_keys: set[str] = {
+            s["key"]
+            for s in resp.json()
+            if s.get("active", False)
+        }
+
+        available = [s for s in TARGET_SPORTS if s in active_keys]
+        skipped = [s for s in TARGET_SPORTS if s not in active_keys]
+
+        if skipped:
+            logger.info("Esportes sem mercado ativo (pulados): %s", skipped)
+        logger.info("Esportes com mercado ativo: %s", available)
+
+        return available
+
+    except httpx.TimeoutException:
+        logger.error("Odds API timeout ao buscar lista de esportes — usando todos os targets")
+        return TARGET_SPORTS
+    except Exception as exc:
+        logger.error("Odds API erro ao buscar esportes ativos: %s — usando todos os targets", exc)
+        return TARGET_SPORTS
 
 
 async def fetch_events_with_odds(sport: str) -> list[EventOdds]:
@@ -140,9 +189,22 @@ def _parse_response(sport: str, data: list[dict]) -> list[EventOdds]:
 
 
 async def fetch_all_sports() -> list[EventOdds]:
-    """Coleta odds de todos os esportes alvo em sequência."""
+    """
+    Coleta odds apenas dos esportes alvo com mercados ativos.
+
+    Fluxo:
+        1. 1 request para /v4/sports → descobre quais têm eventos
+        2. N requests para /v4/sports/{sport}/odds — apenas ativos
+    Economiza até 5 requests por run quando os mercados estão fechados.
+    """
+    active_sports = await fetch_active_target_sports()
+
+    if not active_sports:
+        logger.info("Nenhum esporte alvo com mercado ativo no momento")
+        return []
+
     all_events: list[EventOdds] = []
-    for sport in TARGET_SPORTS:
+    for sport in active_sports:
         events = await fetch_events_with_odds(sport)
         all_events.extend(events)
     return all_events
