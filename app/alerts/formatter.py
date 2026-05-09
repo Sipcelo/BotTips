@@ -6,7 +6,9 @@ conforme o formato definido no CLAUDE.md.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+BRT = timezone(timedelta(hours=-3))
 
 
 SPORT_EMOJI = {
@@ -113,7 +115,8 @@ def format_alert(data: AlertData) -> str:
 
     # Horário
     lines.append("")
-    lines.append(f"🕐 Início: {data.commence_time.strftime('%H:%M UTC')}")
+    commence_brt = data.commence_time.astimezone(BRT)
+    lines.append(f"🕐 Início: {commence_brt.strftime('%H:%M BRT')} ({commence_brt.strftime('%d/%m')})")
     lines.append(f"🏦 Casa: {data.bookmaker.capitalize()}")
 
     # Avisos
