@@ -75,12 +75,12 @@ def apply_filters(
                 f"Odd subiu levemente desde abertura ({odd_opening:.2f} → {odd:.2f})"
             )
 
-    # EV > 25% quase sempre indica dado defasado (jogo já em andamento,
-    # Pinnacle vs soft book desatualizadas). Descarta para evitar falsos positivos.
+    # EV alto = aviso para verificação manual, não bloqueio.
+    # O filtro de jogos em andamento (commence_time > now) já elimina
+    # a principal fonte de falsos positivos. EV alto pré-jogo pode ser
+    # oportunidade real (ex: soft book desatualizada vs Pinnacle ao vivo).
     if ev > 0.25:
-        failures.append(
-            f"EV suspeito ({ev:.1%} > 25%) — possível dado defasado, descartado"
-        )
+        warnings.append(f"EV muito alto ({ev:.1%}) — confirmar odds na casa antes de apostar")
     elif ev > 0.15:
         warnings.append(f"EV alto ({ev:.1%}) — confirmar dados antes de apostar")
 
