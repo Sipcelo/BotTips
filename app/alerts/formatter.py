@@ -62,6 +62,11 @@ class AlertData:
     # Contexto qualitativo (gerado via OpenRouter)
     ai_context: str | None = None
 
+    # MLB — arremessadores prováveis
+    home_pitcher: str | None = None
+    away_pitcher: str | None = None
+    pitcher_confirmed: bool = True   # False = nenhum dos dois confirmado
+
     # Avisos extras
     warnings: list[str] | None = None
 
@@ -85,6 +90,13 @@ def format_alert(data: AlertData) -> str:
 
     if data.surface:
         lines.append(f"🏠 Superfície: {data.surface.capitalize()}")
+
+    # MLB: arremessadores
+    if data.sport == "baseball_mlb":
+        if data.home_pitcher and data.away_pitcher:
+            lines.append(f"⚾ Pitchers: {data.away_pitcher} vs {data.home_pitcher}")
+        else:
+            lines.append("⚾ Pitchers: ⚠️ não confirmados")
 
     lines.append("")
     lines.append("📊 *ANÁLISE*")

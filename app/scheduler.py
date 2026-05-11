@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.context import generate_context
 from app.alerts.formatter import AlertData, format_alert
 from app.alerts.telegram import send_alert
+from app.collectors.mlb_collector import PitcherMatchup, fetch_probable_pitchers, find_pitcher_matchup
 from app.collectors.odds_collector import EventOdds, fetch_all_sports
 from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
@@ -73,9 +74,14 @@ async def run_pipeline() -> None:
         if skipped:
             logger.info("Pipeline: %d evento(s) em andamento ignorado(s)", skipped)
 
+        # Busca pitchers MLB uma vez por run (1 request externo, sem cota)
+        mlb_pitchers: list[PitcherMatchup] = []
+        if any(e.sport == "baseball_mlb" for e in upcoming):
+            mlb_pitchers = await fetch_probable_pitchers()
+
         async with AsyncSessionLocal() as session:
             for event_odds in upcoming:
-                await _process_event(session, event_odds)
+                await _process_event(session, event_odds, mlb_pitchers)
 
         logger.info("Pipeline concluído")
 
@@ -83,8 +89,31 @@ async def run_pipeline() -> None:
         logger.error("Pipeline falhou: %s", exc, exc_info=True)
 
 
-async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
+async def _process_event(
+    session: AsyncSession,
+    event_odds: EventOdds,
+    mlb_pitchers: list[PitcherMatchup] | None = None,
+) -> None:
     """Processa um evento: calcula EV, filtra e envia alerta se aplicável."""
+
+    # MLB: resolve pitcher matchup (grátis via MLB Stats API)
+    home_pitcher: str | None = None
+    away_pitcher: str | None = None
+    pitcher_confirmed = True
+
+    if event_odds.sport == "baseball_mlb" and mlb_pitchers:
+        matchup = find_pitcher_matchup(
+            event_odds.home_team, event_odds.away_team, mlb_pitchers
+        )
+        if matchup:
+            home_pitcher = matchup.home_pitcher
+            away_pitcher = matchup.away_pitcher
+            pitcher_confirmed = bool(home_pitcher and away_pitcher)
+            if not pitcher_confirmed:
+                logger.info(
+                    "MLB pitcher não confirmado: %s vs %s",
+                    event_odds.home_team, event_odds.away_team,
+                )
 
     # Obtém odds do Pinnacle como referência de fair odds
     sharp = next((b for b in event_odds.bookmakers if b.bookmaker in SHARP_BOOKS), None)
@@ -162,6 +191,11 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             odd=analysis.best_odd,
         )
 
+        # Warnings acumulados
+        active_warnings = list(result.warnings or [])
+        if event_odds.sport == "baseball_mlb" and not pitcher_confirmed:
+            active_warnings.append("Pitcher não confirmado — confiança reduzida")
+
         alert_data = AlertData(
             sport=event_odds.sport,
             tournament=event_odds.home_team.split(" ")[0],  # placeholder
@@ -181,7 +215,10 @@ async def _process_event(session: AsyncSession, event_odds: EventOdds) -> None:
             stake_pct=kelly_result.stake_pct,
             stake_amount=kelly_result.stake_amount,
             ai_context=ai_context,
-            warnings=result.warnings or None,
+            home_pitcher=home_pitcher,
+            away_pitcher=away_pitcher,
+            pitcher_confirmed=pitcher_confirmed,
+            warnings=active_warnings or None,
         )
 
         msg = format_alert(alert_data)
