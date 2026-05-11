@@ -19,10 +19,19 @@ from app.collectors.mlb_collector import PitcherMatchup, fetch_probable_pitchers
 from app.collectors.odds_collector import EventOdds, fetch_all_sports
 from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
+from app.collectors.football_collector import fetch_historical_results
 from app.engine.calculator import analyze_market, calculate_overround
+from app.engine.dixon_coles import fit as dc_fit, predict as dc_predict
 from app.engine.elo import elo_model
 from app.engine.filter import _compute_confidence, apply_filters
 from app.engine.kelly import calculate_kelly
+from app.engine.model_store import (
+    FOOTBALL_LEAGUES,
+    get_model,
+    is_football,
+    needs_refit,
+    store_model,
+)
 from app.models.alert import Alert
 from app.models.event import Event
 from app.models.odds import OddsSnapshot
@@ -89,6 +98,12 @@ async def run_pipeline() -> None:
         if any(e.sport == "baseball_mlb" for e in upcoming):
             mlb_pitchers = await fetch_probable_pitchers()
 
+        # Ajusta modelos Dixon-Coles para ligas de futebol que precisam de refit
+        football_leagues_active = {e.sport for e in upcoming if is_football(e.sport)}
+        for league in football_leagues_active:
+            if needs_refit(league):
+                await _fit_dc_model(league)
+
         async with AsyncSessionLocal() as session:
             for event_odds in upcoming:
                 await _process_event(session, event_odds, mlb_pitchers)
@@ -99,6 +114,27 @@ async def run_pipeline() -> None:
 
     except Exception as exc:
         logger.error("Pipeline falhou: %s", exc, exc_info=True)
+
+
+async def _fit_dc_model(league_key: str) -> None:
+    """
+    Baixa dados históricos e ajusta Dixon-Coles para uma liga.
+
+    Falhas são logadas mas não propagadas — pipeline continua sem modelo.
+    """
+    logger.info("DC: iniciando fitting para %s", league_key)
+    try:
+        matches = await fetch_historical_results(league_key)
+        if len(matches) < 50:
+            logger.warning(
+                "DC: apenas %d partidas para %s — modelo não ajustado (mínimo 50)",
+                len(matches), league_key,
+            )
+            return
+        model = dc_fit(matches)
+        store_model(league_key, model)
+    except Exception as exc:
+        logger.error("DC fitting falhou [%s]: %s — usando Pinnacle puro", league_key, exc)
 
 
 async def _process_event(
@@ -127,26 +163,49 @@ async def _process_event(
                     event_odds.home_team, event_odds.away_team,
                 )
 
+    # Futebol: mercado 1X2 — inclui draw_odd na análise
+    sport_is_football = is_football(event_odds.sport)
+
     # Obtém odds do Pinnacle como referência de fair odds
     sharp = next((b for b in event_odds.bookmakers if b.bookmaker in SHARP_BOOKS), None)
     if sharp is None:
         logger.debug("Sem Pinnacle para %s vs %s", event_odds.home_team, event_odds.away_team)
         return
 
-    # Calcula fair odds com base no Pinnacle (mercado mais eficiente)
-    sharp_analysis = analyze_market([sharp.home_odd, sharp.away_odd])
+    # Monta lista de odds do Pinnacle: 2-way para outros esportes, 3-way para futebol
+    if sport_is_football and sharp.draw_odd:
+        sharp_odds = [sharp.home_odd, sharp.draw_odd, sharp.away_odd]
+    else:
+        sharp_odds = [sharp.home_odd, sharp.away_odd]
+
+    sharp_analysis = analyze_market(sharp_odds)
     fair_probs = sharp_analysis.fair_probs
 
-    # Obtém probabilidades do modelo Elo (se disponível)
+    # Obtém probabilidades do modelo específico por esporte
     surface = None
     if "tennis" in event_odds.sport:
         surface = "clay"  # default; será refinado quando tennis_collector fornecer dados
         elo_probs = elo_model.predict(surface, event_odds.home_team, event_odds.away_team)
-        # Média ponderada: 60% Elo + 40% fair odds do Pinnacle
         probs_reais = [
             0.6 * elo_probs[0] + 0.4 * fair_probs[0],
             0.6 * elo_probs[1] + 0.4 * fair_probs[1],
         ]
+    elif sport_is_football:
+        dc_model = get_model(event_odds.sport)
+        if dc_model:
+            dc_probs = dc_predict(event_odds.home_team, event_odds.away_team, dc_model)
+            # Blend: 50% DC + 50% Pinnacle (DC ainda não tem histórico BR validado)
+            if sharp.draw_odd:
+                probs_reais = [
+                    0.5 * dc_probs.home_win + 0.5 * fair_probs[0],
+                    0.5 * dc_probs.draw + 0.5 * fair_probs[1],
+                    0.5 * dc_probs.away_win + 0.5 * fair_probs[2],
+                ]
+            else:
+                probs_reais = fair_probs
+        else:
+            # Sem modelo → só Pinnacle devig (funciona, mas menos preciso)
+            probs_reais = fair_probs
     else:
         probs_reais = fair_probs
 
@@ -159,9 +218,13 @@ async def _process_event(
         if bm.bookmaker in SHARP_BOOKS:
             continue
 
-        soft_odds = [bm.home_odd, bm.away_odd]
-        analysis = analyze_market(soft_odds, probs_reais=probs_reais)
+        # Futebol: inclui draw_odd se disponível
+        if sport_is_football and bm.draw_odd:
+            soft_odds = [bm.home_odd, bm.draw_odd, bm.away_odd]
+        else:
+            soft_odds = [bm.home_odd, bm.away_odd]
 
+        analysis = analyze_market(soft_odds, probs_reais=probs_reais)
         overround_soft = calculate_overround(soft_odds)
         result = apply_filters(
             ev=analysis.best_ev,
@@ -176,10 +239,17 @@ async def _process_event(
             )
             continue
 
-        side = "home" if analysis.best_side_index == 0 else "away"
+        # Mapeia índice → side (futebol tem 3 outcomes: 0=home, 1=draw, 2=away)
+        if sport_is_football and bm.draw_odd:
+            side_map = {0: "home", 1: "draw", 2: "away"}
+        else:
+            side_map = {0: "home", 1: "away"}
+        side = side_map[analysis.best_side_index]
 
         # Fair odd real = Pinnacle devigged (referência de valor, não a Betsson devigged)
-        pinnacle_fair_odd = sharp_analysis.fair_odds[analysis.best_side_index]
+        # Garante que o índice é válido para sharp_analysis (mesmo número de outcomes)
+        sharp_idx = min(analysis.best_side_index, len(sharp_analysis.fair_odds) - 1)
+        pinnacle_fair_odd = sharp_analysis.fair_odds[sharp_idx]
 
         # Verifica se já existe alerta — se sim, atualiza closing odd e pula
         existing = await _get_existing_alert(session, db_event.id, bm.bookmaker)

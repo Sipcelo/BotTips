@@ -18,6 +18,12 @@ SPORT_EMOJI = {
     "handball": "🤾",
     "baseball_mlb": "⚾",
     "mma_mixed_martial_arts": "🥊",
+    "soccer_epl": "⚽",
+    "soccer_spain_la_liga": "⚽",
+    "soccer_germany_bundesliga": "⚽",
+    "soccer_italy_serie_a": "⚽",
+    "soccer_france_ligue_1": "⚽",
+    "soccer_brazil_campeonato": "⚽",
 }
 
 SPORT_LABEL = {
@@ -27,6 +33,19 @@ SPORT_LABEL = {
     "handball": "Handebol EHF",
     "baseball_mlb": "MLB",
     "mma_mixed_martial_arts": "MMA",
+    "soccer_epl": "Premier League",
+    "soccer_spain_la_liga": "La Liga",
+    "soccer_germany_bundesliga": "Bundesliga",
+    "soccer_italy_serie_a": "Serie A",
+    "soccer_france_ligue_1": "Ligue 1",
+    "soccer_brazil_campeonato": "Brasileirão",
+}
+
+# Label amigável para o lado da aposta
+SIDE_LABEL = {
+    "home": lambda home, away: home,
+    "away": lambda home, away: away,
+    "draw": lambda home, away: "Empate",
 }
 
 
@@ -83,7 +102,8 @@ def format_alert(data: AlertData) -> str:
     """
     emoji = SPORT_EMOJI.get(data.sport, "🏅")
     sport_label = SPORT_LABEL.get(data.sport, data.sport)
-    team = data.home_team if data.side == "home" else data.away_team
+    side_fn = SIDE_LABEL.get(data.side, lambda h, a: h)
+    team = side_fn(data.home_team, data.away_team)
 
     confidence_emoji = {"ALTA": "🟢", "MÉDIA": "🟡", "BAIXA": "🔴"}.get(data.confidence, "⚪")
     flag_count = len(data.warnings) if data.warnings else 0

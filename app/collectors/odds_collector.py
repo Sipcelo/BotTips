@@ -27,6 +27,14 @@ TARGET_SPORTS = [
     "handball",
     "baseball_mlb",
     "mma_mixed_martial_arts",
+    # Futebol Europeu — modelo Dixon-Coles (ver docs/sport_football_european.md)
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_germany_bundesliga",
+    "soccer_italy_serie_a",
+    "soccer_france_ligue_1",
+    # Futebol Brasileiro — Dixon-Coles calibrado BR (ver docs/sport_football_brazilian.md)
+    "soccer_brazil_campeonato",
 ]
 
 # Casas prioritárias (sharp + soft)
