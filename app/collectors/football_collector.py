@@ -80,23 +80,23 @@ def _normalize_team(name: str) -> str:
     return TEAM_NAME_MAP.get(name.strip(), name.strip())
 
 
-def _current_and_prev_seasons() -> list[str]:
+def _seasons_to_fetch(n: int = 5) -> list[str]:
     """
-    Retorna códigos de temporada atual + anterior.
-    Ex: temporada 2024/25 → ['2324', '2425']
+    Retorna os códigos das últimas N temporadas europeias.
+    Ex: n=5 em 2024/25 → ['2021', '2122', '2223', '2324', '2425']
+
+    5 temporadas (~1.900 partidas EPL) é o range recomendado para
+    Dixon-Coles convergir com time-decay: jogos de 5 anos atrás têm
+    peso ~exp(-0.0018 × 1825) ≈ 4% — presentes mas não dominantes.
     """
     today = date.today()
     year = today.year
-    # Temporada europeia começa em agosto
-    if today.month >= 8:
-        cur_start = year
-    else:
-        cur_start = year - 1
+    cur_start = year if today.month >= 8 else year - 1
 
     def code(start: int) -> str:
         return f"{str(start)[2:]}{str(start + 1)[2:]}"
 
-    return [code(cur_start - 1), code(cur_start)]
+    return [code(cur_start - n + 1 + i) for i in range(n)]
 
 
 async def fetch_historical_results(league_key: str) -> list[MatchResult]:
@@ -114,7 +114,7 @@ async def fetch_historical_results(league_key: str) -> list[MatchResult]:
 
     results: list[MatchResult] = []
 
-    for season in _current_and_prev_seasons():
+    for season in _seasons_to_fetch(n=5):
         url = f"{BASE_URL}/{season}/{code}.csv"
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
