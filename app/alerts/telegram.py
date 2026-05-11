@@ -71,3 +71,29 @@ async def send_startup_message() -> None:
 async def send_shutdown_message() -> None:
     """Notifica no Telegram que o bot foi encerrado."""
     await send_message("🔴 *ValueBot encerrado*", parse_mode="Markdown")
+
+
+async def send_clv_report(
+    total: int,
+    clv_medio: float,
+    positivos: int,
+    taxa_positiva: float,
+) -> None:
+    """Envia relatório semanal de CLV via Telegram."""
+    sinal = "+" if clv_medio >= 0 else ""
+    avaliacao = (
+        "✅ Edge confirmado" if clv_medio >= 2
+        else "⚠️  Edge marginal" if clv_medio >= 0
+        else "❌ Sem edge detectado"
+    )
+
+    text = (
+        "📊 *RELATÓRIO CLV SEMANAL*\n\n"
+        f"Alertas com CLV registrado: *{total}*\n"
+        f"CLV médio: *{sinal}{clv_medio:.1f}%*\n"
+        f"CLV positivo: *{positivos}/{total}* ({taxa_positiva:.0f}%)\n\n"
+        f"{avaliacao}\n\n"
+        "_CLV mede se você apostou acima do preço justo da Pinnacle. "
+        "CLV médio \\>+2% em 50\\+ apostas = edge real confirmado._"
+    )
+    await send_message(text)

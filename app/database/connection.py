@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -51,4 +52,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def create_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Colunas adicionadas em versões posteriores — IF NOT EXISTS é idempotente
+        await conn.execute(text("""
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS pinnacle_closing_odd FLOAT;
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_percent FLOAT;
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_recorded_at TIMESTAMPTZ;
+        """))
     logger.info("Tabelas criadas/verificadas com sucesso")

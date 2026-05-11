@@ -28,6 +28,14 @@ class Alert(Base):
         DateTime(timezone=True), default=datetime.utcnow
     )
 
+    # CLV — Closing Line Value (métrica primária de edge)
+    # Atualizado a cada pipeline run com a última odd da Pinnacle antes do jogo
+    pinnacle_closing_odd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clv_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clv_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     event: Mapped["Event"] = relationship(back_populates="alerts")  # noqa: F821
 
     def __repr__(self) -> str:

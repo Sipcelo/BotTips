@@ -9,12 +9,12 @@ import logging
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts.context import generate_context
 from app.alerts.formatter import AlertData, format_alert
-from app.alerts.telegram import send_alert
+from app.alerts.telegram import send_alert, send_clv_report
 from app.collectors.mlb_collector import PitcherMatchup, fetch_probable_pitchers, find_pitcher_matchup
 from app.collectors.odds_collector import EventOdds, fetch_all_sports
 from app.config import get_settings
@@ -46,6 +46,16 @@ def build_scheduler() -> AsyncIOScheduler:
         id="value_bet_pipeline",
         replace_existing=True,
         next_run_time=datetime.now(tz=timezone.utc),  # roda imediatamente ao iniciar
+    )
+    # Relatório CLV semanal — domingo às 09:00 BRT (12:00 UTC)
+    scheduler.add_job(
+        weekly_clv_report,
+        trigger="cron",
+        day_of_week="sun",
+        hour=12,
+        minute=0,
+        id="weekly_clv_report",
+        replace_existing=True,
     )
     return scheduler
 
@@ -82,6 +92,8 @@ async def run_pipeline() -> None:
         async with AsyncSessionLocal() as session:
             for event_odds in upcoming:
                 await _process_event(session, event_odds, mlb_pitchers)
+            # Calcula CLV para jogos que já começaram
+            await _finalize_clv(session)
 
         logger.info("Pipeline concluído")
 
@@ -164,15 +176,17 @@ async def _process_event(
             )
             continue
 
-        # Já enviamos alerta para este evento+casa hoje?
-        already_alerted = await _already_alerted(session, db_event.id, bm.bookmaker)
-        if already_alerted:
-            continue
-
         side = "home" if analysis.best_side_index == 0 else "away"
 
         # Fair odd real = Pinnacle devigged (referência de valor, não a Betsson devigged)
         pinnacle_fair_odd = sharp_analysis.fair_odds[analysis.best_side_index]
+
+        # Verifica se já existe alerta — se sim, atualiza closing odd e pula
+        existing = await _get_existing_alert(session, db_event.id, bm.bookmaker)
+        if existing:
+            existing.pinnacle_closing_odd = pinnacle_fair_odd
+            await session.commit()
+            continue
 
         kelly_result = calculate_kelly(
             prob_real=analysis.best_prob_real,
@@ -230,7 +244,7 @@ async def _process_event(
             bookmaker=bm.bookmaker,
             side=side,
             odd=analysis.best_odd,
-            fair_odd=analysis.best_fair_odd,
+            fair_odd=pinnacle_fair_odd,
             ev=analysis.best_ev,
             prob_real=analysis.best_prob_real,
             overround=overround_soft,
@@ -239,6 +253,7 @@ async def _process_event(
             stake_amount=kelly_result.stake_amount,
             bankroll=DEFAULT_BANKROLL,
             telegram_msg_id=msg_id,
+            pinnacle_closing_odd=pinnacle_fair_odd,  # será atualizado a cada run
         )
         session.add(db_alert)
 
@@ -284,12 +299,78 @@ async def _upsert_event(
     return event
 
 
-async def _already_alerted(session: AsyncSession, event_id: int, bookmaker: str) -> bool:
-    """Verifica se já enviamos alerta para este evento + casa hoje."""
+async def _get_existing_alert(
+    session: AsyncSession, event_id: int, bookmaker: str
+) -> Alert | None:
+    """Retorna alerta existente para este evento + casa, ou None."""
     result = await session.execute(
         select(Alert).where(
             Alert.event_id == event_id,
             Alert.bookmaker == bookmaker,
         )
     )
-    return result.scalar_one_or_none() is not None
+    return result.scalar_one_or_none()
+
+
+async def _finalize_clv(session: AsyncSession) -> None:
+    """
+    Calcula CLV para alertas cujo jogo já começou.
+
+    CLV = (odd_apostada / pinnacle_closing_odd) - 1
+
+    Roda ao final de cada pipeline. Como os jogos em andamento são filtrados
+    da coleta de odds, pinnacle_closing_odd já contém a última odd registrada
+    antes do início — isso é a closing line.
+    """
+    now = datetime.now(tz=timezone.utc)
+    result = await session.execute(
+        select(Alert)
+        .join(Event)
+        .where(
+            Alert.clv_percent.is_(None),
+            Alert.pinnacle_closing_odd.is_not(None),
+            Event.commence_time < now,
+        )
+    )
+    alerts = result.scalars().all()
+
+    for alert in alerts:
+        clv = (alert.odd / alert.pinnacle_closing_odd) - 1
+        alert.clv_percent = clv
+        alert.clv_recorded_at = now
+        logger.info(
+            "CLV registrado: odd=%.2f closing=%.2f CLV=%+.1f%%",
+            alert.odd, alert.pinnacle_closing_odd, clv * 100,
+        )
+
+    if alerts:
+        await session.commit()
+
+
+async def weekly_clv_report() -> None:
+    """
+    Gera e envia relatório semanal de CLV via Telegram.
+    Roda todo domingo às 09:00 BRT.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(
+                func.count(Alert.id).label("total"),
+                func.avg(Alert.clv_percent).label("clv_medio"),
+                func.sum(
+                    func.cast(Alert.clv_percent > 0, type_=None)
+                ).label("positivos"),
+            ).where(Alert.clv_percent.is_not(None))
+        )
+        row = result.one()
+
+    total = row.total or 0
+    if total == 0:
+        logger.info("CLV report: sem dados ainda")
+        return
+
+    clv_medio = (row.clv_medio or 0) * 100
+    positivos = row.positivos or 0
+    taxa = (positivos / total * 100) if total else 0
+
+    await send_clv_report(total, clv_medio, positivos, taxa)
