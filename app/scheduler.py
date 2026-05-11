@@ -203,21 +203,14 @@ async def _process_event(
             0.6 * elo_probs[1] + 0.4 * fair_probs[1],
         ]
     elif sport_is_football:
+        # Futebol: Pinnacle é o benchmark primário (Wisdom of the Crowd).
+        # O alerta só é válido se soft_odd > pinnacle_fair_odd.
+        # DC entra apenas como flag de contexto (via warnings), não como fonte de EV.
+        # Quando DC tiver CLV positivo validado em 50+ apostas, revisitar blend.
+        probs_reais = fair_probs
+
+        # Salva probs DC para flags de contexto (se modelo disponível)
         dc_model = get_model(event_odds.sport)
-        if dc_model:
-            dc_probs = dc_predict(event_odds.home_team, event_odds.away_team, dc_model)
-            # Blend: 50% DC + 50% Pinnacle (DC ainda não tem histórico BR validado)
-            if sharp.draw_odd:
-                probs_reais = [
-                    0.5 * dc_probs.home_win + 0.5 * fair_probs[0],
-                    0.5 * dc_probs.draw + 0.5 * fair_probs[1],
-                    0.5 * dc_probs.away_win + 0.5 * fair_probs[2],
-                ]
-            else:
-                probs_reais = fair_probs
-        else:
-            # Sem modelo → só Pinnacle devig (funciona, mas menos preciso)
-            probs_reais = fair_probs
     else:
         probs_reais = fair_probs
 
@@ -308,6 +301,16 @@ async def _process_event(
         active_warnings = list(result.warnings or [])
         if event_odds.sport == "baseball_mlb" and not pitcher_confirmed:
             active_warnings.append("Pitcher não confirmado — confiança reduzida")
+
+        # DC como flag de contexto: se modelo discorda da direção da aposta, adiciona aviso
+        if sport_is_football and dc_model:
+            dc_probs = dc_predict(event_odds.home_team, event_odds.away_team, dc_model)
+            dc_prob_side = [dc_probs.home_win, dc_probs.draw, dc_probs.away_win]
+            dc_best_idx = dc_prob_side.index(max(dc_prob_side))
+            if dc_best_idx != analysis.best_side_index:
+                active_warnings.append(
+                    "Modelo DC aponta direção diferente do Pinnacle — confirmar antes de apostar"
+                )
 
         # xG divergence flag — futebol europeu com dados Understat
         if sport_is_football:
