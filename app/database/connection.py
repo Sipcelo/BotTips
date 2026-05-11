@@ -53,9 +53,14 @@ async def create_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Colunas adicionadas em versões posteriores — IF NOT EXISTS é idempotente
-        await conn.execute(text("""
-            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS pinnacle_closing_odd FLOAT;
-            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_percent FLOAT;
-            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_recorded_at TIMESTAMPTZ;
-        """))
+        # asyncpg não aceita múltiplos comandos num único prepared statement
+        await conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS pinnacle_closing_odd FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_percent FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS clv_recorded_at TIMESTAMPTZ"
+        ))
     logger.info("Tabelas criadas/verificadas com sucesso")
