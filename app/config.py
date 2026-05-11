@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
 
-    min_ev: float = 0.04
+    min_ev: float = 0.02
     min_odd: float = 1.60
     max_odd: float = 4.00
     max_margin: float = 0.10

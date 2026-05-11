@@ -28,7 +28,7 @@ def apply_filters(
     Aplica todos os filtros de qualidade a uma oportunidade.
 
     Filtros obrigatórios (falha = descarta):
-        1. EV >= MIN_EV (default 4%)
+        1. EV >= MIN_EV (default 2% — Buchdahl production threshold)
         2. odd >= MIN_ODD (default 1.60)
         3. odd <= MAX_ODD (default 4.00)
         4. overround <= MAX_MARGIN (default 10%)
