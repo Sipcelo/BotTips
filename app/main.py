@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from app.alerts.telegram import send_shutdown_message, send_startup_message
 from app.config import get_settings
 from app.database.connection import create_tables
-from app.models import alert, event, odds  # noqa: F401 — registra modelos no Base
+from app.models import alert, event, odds, team_xg  # noqa: F401 — registra modelos no Base
 from app.scheduler import build_scheduler
 
 logging.basicConfig(

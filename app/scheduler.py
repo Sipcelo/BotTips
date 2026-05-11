@@ -20,6 +20,7 @@ from app.collectors.odds_collector import EventOdds, fetch_all_sports
 from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
 from app.collectors.football_collector import fetch_historical_results
+from app.collectors.understat_collector import fetch_all_leagues_xg
 from app.engine.calculator import analyze_market, calculate_overround
 from app.engine.dixon_coles import fit as dc_fit, predict as dc_predict
 from app.engine.elo import elo_model
@@ -35,6 +36,7 @@ from app.engine.model_store import (
 from app.models.alert import Alert
 from app.models.event import Event
 from app.models.odds import OddsSnapshot
+from app.models.team_xg import TeamXG
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,16 @@ def build_scheduler() -> AsyncIOScheduler:
         minute=0,
         id="weekly_clv_report",
         replace_existing=True,
+    )
+    # xG Understat — a cada 3 dias (cadência de rodada europeia)
+    # Roda às 06:00 UTC (03:00 BRT) para não competir com o pipeline
+    scheduler.add_job(
+        update_xg_data,
+        trigger="interval",
+        days=3,
+        id="xg_update",
+        replace_existing=True,
+        next_run_time=datetime.now(tz=timezone.utc),  # roda uma vez no startup
     )
     return scheduler
 
@@ -297,6 +309,28 @@ async def _process_event(
         if event_odds.sport == "baseball_mlb" and not pitcher_confirmed:
             active_warnings.append("Pitcher não confirmado — confiança reduzida")
 
+        # xG divergence flag — futebol europeu com dados Understat
+        if sport_is_football:
+            for team_name, team_side in [
+                (event_odds.home_team, "home"),
+                (event_odds.away_team, "away"),
+            ]:
+                xg_row = await _get_team_xg(session, team_name, event_odds.sport)
+                if xg_row and xg_row.matches_played >= 5:
+                    div = xg_row.xg_divergence
+                    if div > 0.30:
+                        active_warnings.append(
+                            f"{team_name} marcando {div:+.0%} acima do xG "
+                            f"({xg_row.goals_for}g / {xg_row.xg_for:.1f}xG) "
+                            f"— regressão negativa provável"
+                        )
+                    elif div < -0.30:
+                        active_warnings.append(
+                            f"{team_name} marcando {div:+.0%} abaixo do xG "
+                            f"({xg_row.goals_for}g / {xg_row.xg_for:.1f}xG) "
+                            f"— melhora esperada"
+                        )
+
         # Recalcula confiança após adicionar flags extra (pitcher, etc.)
         confidence = _compute_confidence(active_warnings)
 
@@ -450,6 +484,79 @@ async def _finalize_clv(session: AsyncSession) -> None:
 
     if alerts:
         await session.commit()
+
+
+async def update_xg_data() -> None:
+    """
+    Coleta xG do Understat para todas as ligas europeias monitoradas
+    e persiste no banco. Roda a cada 3 dias.
+
+    Divergência > 30% gera flag automática nos próximos alertas daquela equipe.
+    """
+    football_keys = [k for k in FOOTBALL_LEAGUES if "brazil" not in k]
+    logger.info("xG update iniciado para %d ligas", len(football_keys))
+
+    try:
+        xg_list = await fetch_all_leagues_xg(football_keys)
+
+        async with AsyncSessionLocal() as session:
+            for data in xg_list:
+                # Upsert: atualiza se existe, cria se não existe
+                result = await session.execute(
+                    select(TeamXG).where(
+                        TeamXG.team_name == data.team_name,
+                        TeamXG.league_key == data.league_key,
+                        TeamXG.season == data.season,
+                    )
+                )
+                row = result.scalar_one_or_none()
+
+                if row:
+                    row.matches_played = data.matches_played
+                    row.goals_for = data.goals_for
+                    row.goals_against = data.goals_against
+                    row.xg_for = data.xg_for
+                    row.xg_against = data.xg_against
+                    row.xg_divergence = data.xg_divergence
+                    row.last_updated = data.fetched_at
+                else:
+                    session.add(TeamXG(
+                        team_name=data.team_name,
+                        league_key=data.league_key,
+                        season=data.season,
+                        matches_played=data.matches_played,
+                        goals_for=data.goals_for,
+                        goals_against=data.goals_against,
+                        xg_for=data.xg_for,
+                        xg_against=data.xg_against,
+                        xg_divergence=data.xg_divergence,
+                        last_updated=data.fetched_at,
+                    ))
+
+            await session.commit()
+
+        logger.info("xG update concluído: %d registros salvos", len(xg_list))
+
+    except Exception as exc:
+        logger.error("xG update falhou: %s", exc, exc_info=True)
+
+
+async def _get_team_xg(
+    session: AsyncSession,
+    team_name: str,
+    league_key: str,
+) -> TeamXG | None:
+    """Retorna dados xG de um time na temporada atual, ou None se indisponível."""
+    from app.collectors.understat_collector import _current_season
+    season = _current_season()
+    result = await session.execute(
+        select(TeamXG).where(
+            TeamXG.team_name == team_name,
+            TeamXG.league_key == league_key,
+            TeamXG.season == season,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def weekly_clv_report() -> None:
