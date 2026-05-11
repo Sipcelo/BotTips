@@ -15,6 +15,23 @@ class FilterResult:
     passed: bool
     failures: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    confidence: str = "ALTA"   # "ALTA" | "MÉDIA" | "BAIXA"
+
+
+def _compute_confidence(warnings: list[str]) -> str:
+    """
+    Calcula nível de confiança baseado na quantidade de flags.
+
+    ALTA  → 0 flags
+    MÉDIA → 1–2 flags
+    BAIXA → 3+ flags
+    """
+    n = len(warnings)
+    if n == 0:
+        return "ALTA"
+    if n <= 2:
+        return "MÉDIA"
+    return "BAIXA"
 
 
 def apply_filters(
@@ -88,4 +105,5 @@ def apply_filters(
         passed=len(failures) == 0,
         failures=failures,
         warnings=warnings,
+        confidence=_compute_confidence(warnings),
     )

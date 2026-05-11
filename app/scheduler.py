@@ -6,7 +6,7 @@ Roda a cada POLL_INTERVAL_SECONDS (default: 300s).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import func, select
@@ -21,7 +21,7 @@ from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
 from app.engine.calculator import analyze_market, calculate_overround
 from app.engine.elo import elo_model
-from app.engine.filter import apply_filters
+from app.engine.filter import _compute_confidence, apply_filters
 from app.engine.kelly import calculate_kelly
 from app.models.alert import Alert
 from app.models.event import Event
@@ -194,6 +194,23 @@ async def _process_event(
             bankroll=DEFAULT_BANKROLL,
         )
 
+        # Piso mínimo de Kelly — edge muito pequeno após vig e atrito → skip
+        if kelly_result.stake_amount == 0.0:
+            logger.debug(
+                "Kelly abaixo do piso mínimo [%s/%s] — descartado",
+                event_odds.home_team, bm.bookmaker,
+            )
+            continue
+
+        # Limite diário de alertas (anti-fadiga)
+        today_count = await _daily_alert_count(session)
+        if today_count >= DAILY_ALERT_CAP:
+            logger.warning(
+                "Cap diário atingido (%d alertas) — pipeline pausado até amanhã",
+                DAILY_ALERT_CAP,
+            )
+            return
+
         # Contexto qualitativo via OpenRouter (falha silenciosamente)
         ai_context = await generate_context(
             sport=event_odds.sport,
@@ -205,10 +222,13 @@ async def _process_event(
             odd=analysis.best_odd,
         )
 
-        # Warnings acumulados
+        # Warnings acumulados — pitcher MLB adiciona 1 flag extra
         active_warnings = list(result.warnings or [])
         if event_odds.sport == "baseball_mlb" and not pitcher_confirmed:
             active_warnings.append("Pitcher não confirmado — confiança reduzida")
+
+        # Recalcula confiança após adicionar flags extra (pitcher, etc.)
+        confidence = _compute_confidence(active_warnings)
 
         alert_data = AlertData(
             sport=event_odds.sport,
@@ -232,6 +252,7 @@ async def _process_event(
             home_pitcher=home_pitcher,
             away_pitcher=away_pitcher,
             pitcher_confirmed=pitcher_confirmed,
+            confidence=confidence,
             warnings=active_warnings or None,
         )
 
@@ -297,6 +318,20 @@ async def _upsert_event(
     session.add(event)
     await session.flush()  # gera o id sem commit
     return event
+
+
+DAILY_ALERT_CAP = 10
+
+
+async def _daily_alert_count(session: AsyncSession) -> int:
+    """Conta alertas enviados hoje (UTC). Usado para impor limite diário."""
+    start_of_day = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    result = await session.execute(
+        select(func.count(Alert.id)).where(Alert.sent_at >= start_of_day)
+    )
+    return result.scalar_one() or 0
 
 
 async def _get_existing_alert(

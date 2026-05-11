@@ -67,6 +67,9 @@ class AlertData:
     away_pitcher: str | None = None
     pitcher_confirmed: bool = True   # False = nenhum dos dois confirmado
 
+    # Nível de confiança calculado pelo filter
+    confidence: str = "ALTA"   # "ALTA" | "MÉDIA" | "BAIXA"
+
     # Avisos extras
     warnings: list[str] | None = None
 
@@ -82,9 +85,13 @@ def format_alert(data: AlertData) -> str:
     sport_label = SPORT_LABEL.get(data.sport, data.sport)
     team = data.home_team if data.side == "home" else data.away_team
 
+    confidence_emoji = {"ALTA": "🟢", "MÉDIA": "🟡", "BAIXA": "🔴"}.get(data.confidence, "⚪")
+    flag_count = len(data.warnings) if data.warnings else 0
+    flag_label = f"{flag_count} flag" + ("s" if flag_count != 1 else "")
+
     lines = [
-        "🔴 *ALERTA VALUE BET*\n",
-        f"{emoji} {sport_label} — {data.tournament}",
+        f"{confidence_emoji} *[{data.confidence}] ALERTA VALUE BET*",
+        f"_{emoji} {sport_label} — {team} ML @ {data.odd:.2f} | EV +{data.ev:.1%} | {flag_label}_\n",
         f"⚔️  {data.home_team} vs {data.away_team}",
     ]
 

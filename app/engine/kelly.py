@@ -56,6 +56,18 @@ def calculate_kelly(
             bankroll=bankroll,
         )
 
+    # Piso mínimo de edge: f* < 0.25% da banca → skip após vig e atrito
+    # Buchdahl: "edge too small to act on after fees, vig variance, and stake friction"
+    MIN_KELLY_FULL = 0.0025
+    if kelly_full < MIN_KELLY_FULL:
+        return KellyResult(
+            kelly_full=kelly_full,
+            kelly_fraction=0.0,
+            stake_pct=0.0,
+            stake_amount=0.0,
+            bankroll=bankroll,
+        )
+
     kelly_frac = kelly_full * fraction
     stake_pct = min(kelly_frac, max_pct)
     stake_raw = bankroll * stake_pct
