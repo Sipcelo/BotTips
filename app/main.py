@@ -112,7 +112,7 @@ async def dc_status():
     return {"dc_models": result}
 
 
-@app.post("/admin/dc-fit")
+@app.get("/admin/dc-fit")
 async def trigger_dc_fit():
     """
     Força o fitting do Dixon-Coles para todas as ligas europeias agora.
