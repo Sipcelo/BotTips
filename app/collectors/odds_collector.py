@@ -83,6 +83,7 @@ class BookmakerOdds:
 class EventOdds:
     external_id: str
     sport: str
+    sport_title: str          # nome do torneio/liga vindo da Odds API (ex: "UFC Fight Night")
     home_team: str
     away_team: str
     commence_time: datetime
@@ -190,6 +191,7 @@ def _parse_response(sport: str, data: list[dict]) -> list[EventOdds]:
             event = EventOdds(
                 external_id=item["id"],
                 sport=sport,
+                sport_title=item.get("sport_title", sport),
                 home_team=item["home_team"],
                 away_team=item["away_team"],
                 commence_time=commence_time,

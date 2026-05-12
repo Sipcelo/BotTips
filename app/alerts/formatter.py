@@ -109,9 +109,11 @@ def format_alert(data: AlertData) -> str:
     flag_count = len(data.warnings) if data.warnings else 0
     flag_label = f"{flag_count} flag" + ("s" if flag_count != 1 else "")
 
+    # Subtítulo: "UFC Fight Night — Shauna Bannon @ 2.90 | EV +3.6% | 0 flags"
+    # Para futebol com empate: mostra "Empate" em vez do nome do time
     lines = [
         f"{confidence_emoji} *[{data.confidence}] ALERTA VALUE BET*",
-        f"_{emoji} {sport_label} — {team} ML @ {data.odd:.2f} | EV +{data.ev:.1%} | {flag_label}_\n",
+        f"_{emoji} {data.tournament} — {team} @ {data.odd:.2f} | EV +{data.ev:.1%} | {flag_label}_\n",
         f"⚔️  {data.home_team} vs {data.away_team}",
     ]
 

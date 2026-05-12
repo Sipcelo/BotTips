@@ -364,7 +364,7 @@ async def _process_event(
 
         alert_data = AlertData(
             sport=event_odds.sport,
-            tournament=event_odds.home_team.split(" ")[0],  # placeholder
+            tournament=event_odds.sport_title,
             home_team=event_odds.home_team,
             away_team=event_odds.away_team,
             surface=surface,
