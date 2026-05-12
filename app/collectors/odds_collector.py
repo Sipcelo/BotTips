@@ -5,6 +5,11 @@ Busca eventos e odds de múltiplas casas para os esportes alvo.
 Usa /v4/sports (1 request) para descobrir quais esportes têm mercados
 ativos antes de buscar odds — economiza requests na cota mensal.
 Em caso de erro na API, loga e retorna lista vazia (não quebra o scheduler).
+
+Quota guard:
+    Rastreia x-requests-remaining do header após cada chamada.
+    Se restar menos de QUOTA_PAUSE_THRESHOLD requests, o pipeline é pausado
+    e uma mensagem de aviso é enviada via Telegram.
 """
 
 import logging
@@ -18,6 +23,30 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.the-odds-api.com/v4"
+
+# Quando requests_remaining cair abaixo deste valor, o pipeline para
+# e envia alerta Telegram para não esgotarmos a cota antes dos jogos do fim de semana.
+QUOTA_PAUSE_THRESHOLD = 30
+
+# Último valor conhecido de requests_remaining (atualizado a cada resposta da API)
+_quota_remaining: int | None = None
+
+
+def get_quota_remaining() -> int | None:
+    """Retorna o último valor conhecido de requests_remaining, ou None se desconhecido."""
+    return _quota_remaining
+
+
+def _update_quota(headers: dict) -> int | None:
+    """Extrai e persiste x-requests-remaining do header da resposta."""
+    global _quota_remaining
+    raw = headers.get("x-requests-remaining")
+    if raw and raw != "?":
+        try:
+            _quota_remaining = int(raw)
+        except ValueError:
+            pass
+    return _quota_remaining
 
 # Esportes monitorados conforme CLAUDE.md
 TARGET_SPORTS = [
@@ -76,6 +105,7 @@ async def fetch_active_target_sports() -> list[str]:
             resp = await client.get(f"{BASE_URL}/sports", params=params)
 
         remaining = resp.headers.get("x-requests-remaining", "?")
+        _update_quota(resp.headers)
         logger.info("Odds API [sports list] status=%s requests_left=%s", resp.status_code, remaining)
 
         if resp.status_code == 401:
@@ -128,6 +158,7 @@ async def fetch_events_with_odds(sport: str) -> list[EventOdds]:
             resp = await client.get(f"{BASE_URL}/sports/{sport}/odds", params=params)
 
         remaining = resp.headers.get("x-requests-remaining", "?")
+        _update_quota(resp.headers)
         logger.info("Odds API [%s] status=%s requests_left=%s", sport, resp.status_code, remaining)
 
         if resp.status_code == 401:

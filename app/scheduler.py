@@ -15,12 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.alerts.context import generate_context
 from app.alerts.formatter import AlertData, format_alert
 from app.alerts.telegram import send_alert, send_clv_report
+from app.collectors.football_collector import fetch_historical_results
 from app.collectors.mlb_collector import PitcherMatchup, fetch_probable_pitchers, find_pitcher_matchup
-from app.collectors.odds_collector import EventOdds, fetch_all_sports
+from app.collectors.odds_collector import (
+    EventOdds,
+    QUOTA_PAUSE_THRESHOLD,
+    fetch_all_sports,
+    get_quota_remaining,
+)
+from app.collectors.understat_collector import fetch_all_leagues_xg
 from app.config import get_settings
 from app.database.connection import AsyncSessionLocal
-from app.collectors.football_collector import fetch_historical_results
-from app.collectors.understat_collector import fetch_all_leagues_xg
 from app.engine.calculator import analyze_market, calculate_overround
 from app.engine.dixon_coles import fit as dc_fit, predict as dc_predict
 from app.engine.elo import elo_model
@@ -93,6 +98,26 @@ async def run_pipeline() -> None:
     """
     now = datetime.now(tz=timezone.utc)
     logger.info("Pipeline iniciado — %s", now.isoformat())
+
+    # Quota guard: para o pipeline se a cota estiver quase esgotada.
+    # Protege contra exaurir os requests antes dos jogos do fim de semana.
+    quota = get_quota_remaining()
+    if quota is not None and quota <= QUOTA_PAUSE_THRESHOLD:
+        logger.warning(
+            "⚠️ QUOTA BAIXA: apenas %d requests restantes — pipeline pausado. "
+            "Aumente POLL_INTERVAL_SECONDS no Railway ou aguarde renovação da cota.",
+            quota,
+        )
+        from app.alerts.telegram import send_message
+        await send_message(
+            f"⚠️ <b>ValueBot — Cota da Odds API baixa</b>\n\n"
+            f"Restam apenas <b>{quota} requests</b> do mês.\n"
+            f"Pipeline pausado para preservar cota até os próximos jogos.\n\n"
+            f"💡 Solução: aumente <code>POLL_INTERVAL_SECONDS</code> no Railway "
+            f"(recomendado: 3600 ou mais).",
+            parse_mode="HTML",
+        )
+        return
 
     try:
         events = await fetch_all_sports()

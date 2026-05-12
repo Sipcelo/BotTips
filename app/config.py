@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     max_stake_pct: float = 0.03
     min_stake_amount: float = 3.00   # stake mínimo em reais
     max_stake_amount: float = 5.00   # stake máximo em reais
-    poll_interval_seconds: int = 300
+    poll_interval_seconds: int = 1800  # 30min — economiza cota (500 req/mês free tier)
     environment: str = "development"
 
 

@@ -136,6 +136,60 @@ async def trigger_dc_fit():
     }
 
 
+@app.get("/admin/quota")
+async def quota_status():
+    """
+    Status atual da cota da Odds API.
+
+    Mostra requests restantes (atualizado a cada run do pipeline),
+    intervalo atual e estimativa de quantos dias de operação restam.
+    """
+    from app.collectors.odds_collector import get_quota_remaining, QUOTA_PAUSE_THRESHOLD
+
+    remaining = get_quota_remaining()
+    settings = get_settings()
+    interval = settings.poll_interval_seconds
+
+    # 1 request para sports list + N sports ativos (estimativa conservadora: 7)
+    requests_per_run = 1 + 7
+    runs_per_day = 86400 / interval
+    requests_per_day = requests_per_run * runs_per_day
+
+    days_left = None
+    if remaining is not None and requests_per_day > 0:
+        days_left = round(remaining / requests_per_day, 1)
+
+    # Recomendação de intervalo para durar até fim do mês
+    # (supondo renovação no dia 1 de cada mês)
+    today = datetime.now(tz=timezone.utc)
+    days_in_month = 30  # estimativa conservadora
+    remaining_days = days_in_month - today.day
+    if remaining is not None and remaining_days > 0:
+        budget_per_day = remaining / remaining_days
+        min_interval = round(86400 / (budget_per_day / requests_per_run)) if budget_per_day > 0 else None
+    else:
+        min_interval = None
+
+    return {
+        "requests_remaining": remaining,
+        "quota_pause_threshold": QUOTA_PAUSE_THRESHOLD,
+        "poll_interval_seconds": interval,
+        "estimated_requests_per_day": round(requests_per_day),
+        "estimated_days_left": days_left,
+        "recommended_min_interval_seconds": min_interval,
+        "status": (
+            "ok" if remaining is None or remaining > QUOTA_PAUSE_THRESHOLD
+            else "QUOTA_LOW — pipeline pausado"
+        ),
+        "dica": (
+            f"Para durar até fim do mês com {remaining} requests restantes: "
+            f"defina POLL_INTERVAL_SECONDS={min_interval} no Railway."
+            if min_interval else
+            "Aguarde o primeiro pipeline rodar para calcular estimativas."
+        ),
+    }
+
+
 @app.get("/admin/clv-status")
 async def clv_status():
     """
