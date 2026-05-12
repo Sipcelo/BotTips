@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     min_ev: float = 0.02
     min_odd: float = 1.60
     max_odd: float = 4.00
+    max_fair_odd: float = 2.00   # Pinnacle fair odd máxima = prob real mínima de 50%
     max_margin: float = 0.10
     kelly_fraction: float = 0.25
     max_stake_pct: float = 0.03

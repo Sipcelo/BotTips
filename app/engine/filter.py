@@ -38,6 +38,7 @@ def apply_filters(
     ev: float,
     odd: float,
     overround: float,
+    fair_odd: float | None = None,
     odd_opening: float | None = None,
     odd_30min_ago: float | None = None,
 ) -> FilterResult:
@@ -48,8 +49,13 @@ def apply_filters(
         1. EV >= MIN_EV (default 2% — Buchdahl production threshold)
         2. odd >= MIN_ODD (default 1.60)
         3. odd <= MAX_ODD (default 4.00)
-        4. overround <= MAX_MARGIN (default 10%)
-        5. Sem line movement contrário (odd não pode ter subido)
+        4. fair_odd <= MAX_FAIR_ODD (default 2.00 = prob real mínima 50%)
+        5. overround <= MAX_MARGIN (default 10%)
+        6. Sem line movement contrário (odd não pode ter subido)
+
+    O filtro de fair_odd usa a odd devigged do Pinnacle — não a odd da casa soft.
+    Isso garante que só apostamos em outcomes onde o mercado sharp aponta
+    probabilidade real >= 50%, evitando longshots de alta variância.
     """
     settings = get_settings()
     failures: list[str] = []
@@ -68,6 +74,16 @@ def apply_filters(
     if odd > settings.max_odd:
         failures.append(
             f"Odd muito alta (longshot): {odd:.2f} > máximo {settings.max_odd:.2f}"
+        )
+
+    # Filtro de probabilidade real via Pinnacle fair odd
+    # Garante que só apostamos quando o mercado sharp atribui >= 50% de chance
+    if fair_odd is not None and fair_odd > settings.max_fair_odd:
+        prob_real = 1 / fair_odd
+        prob_min = 1 / settings.max_fair_odd
+        failures.append(
+            f"Prob. real muito baixa: {prob_real:.0%} (Pinnacle fair {fair_odd:.2f}) "
+            f"< mínimo {prob_min:.0%} (max_fair_odd {settings.max_fair_odd:.2f})"
         )
 
     if overround > settings.max_margin:

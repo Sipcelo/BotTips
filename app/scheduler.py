@@ -256,10 +256,16 @@ async def _process_event(
 
         analysis = analyze_market(soft_odds, probs_reais=probs_reais)
         overround_soft = calculate_overround(soft_odds)
+        # pinnacle_fair_odd: odd devigged do Pinnacle para o lado escolhido
+        # Calculado aqui para passar ao filtro de prob real (max_fair_odd)
+        sharp_idx_pre = min(analysis.best_side_index, len(sharp_analysis.fair_odds) - 1)
+        pinnacle_fair_for_filter = sharp_analysis.fair_odds[sharp_idx_pre]
+
         result = apply_filters(
             ev=analysis.best_ev,
             odd=analysis.best_odd,
             overround=overround_soft,
+            fair_odd=pinnacle_fair_for_filter,
         )
 
         if not result.passed:
@@ -276,10 +282,8 @@ async def _process_event(
             side_map = {0: "home", 1: "away"}
         side = side_map[analysis.best_side_index]
 
-        # Fair odd real = Pinnacle devigged (referência de valor, não a Betsson devigged)
-        # Garante que o índice é válido para sharp_analysis (mesmo número de outcomes)
-        sharp_idx = min(analysis.best_side_index, len(sharp_analysis.fair_odds) - 1)
-        pinnacle_fair_odd = sharp_analysis.fair_odds[sharp_idx]
+        # Reutiliza o índice já calculado (mesmo valor que pinnacle_fair_for_filter)
+        pinnacle_fair_odd = pinnacle_fair_for_filter
 
         # Verifica se já existe alerta — se sim, atualiza closing odd e pula
         existing = await _get_existing_alert(session, db_event.id, bm.bookmaker)
